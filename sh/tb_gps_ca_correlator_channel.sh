@@ -6,7 +6,7 @@ fi
 
 # Run Icarus verilog:
 iverilog -g2012 -Wall -o sim \
-  ../test/tb_gps_ca_correlator_channel.v \
-  ../rtl/gps_ca_correlator_channel.v
+  ../test/tb_gps_ca_correlator_channel.sv \
+  ../rtl/gps_ca_correlator_channel.sv
 
 vvp sim

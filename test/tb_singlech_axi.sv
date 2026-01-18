@@ -4,7 +4,7 @@
 // Build (from your script):
 //   iverilog -g2012 -Wall -o sim \
 //     ../test/tb_singlech_axi.sv \
-//     ../rtl/gps_ca_correlator_channel.v \
+//     ../rtl/gps_ca_correlator_channel.sv \
 //     ../rtl/gp2021_axi_wrapper.sv \
 //     ../rtl/top_singlech_axi_sim.sv
 // Run:
@@ -14,11 +14,29 @@
 
 module tb_singlech_axi;
 
+  // ---------------- User settings ----------------
   localparam int PHASE_W = 32;
   localparam int ACC_W   = 18;
 
+  // Sample rate and nominal IF
+  localparam real FS_HZ          = 16.368e6;
+  localparam real IF_HZ_NOMINAL  = 4.092e6;   // nominal center frequency
+
+  // Match your IF simulator settings:
+  localparam int  PRN_ID               = 1;
+  localparam real CARR_DOPPLER_HZ      = 1500.0;
+  localparam real CODE_DOPPLER_HZ      = 0.0; // to search code delay
+
+  // Derived frequencies
+  localparam real CARR_WIPE_HZ    = IF_HZ_NOMINAL + CARR_DOPPLER_HZ; // LO frequency
+  localparam real CHIP_HZ_NOMINAL = 1.023e6 + CARR_DOPPLER_HZ / 1540.0; 
+  localparam real CHIP_HZ         = CHIP_HZ_NOMINAL + CODE_DOPPLER_HZ; 
+
+  // Input/output file names
+  localparam string INFILE  = "../sim/gps_if.txt";
+  localparam string OUTFILE = "gps_dump_axi.txt";
+
   // ---------------- Clocks ----------------
-  localparam real FS_HZ   = 16_368_000.0;
   localparam real TCLK_NS = 1e9 / FS_HZ;
 
   reg samp_clk = 1'b0;
@@ -79,6 +97,17 @@ module tb_singlech_axi;
     .s_axi_rvalid(rvalid),
     .s_axi_rready(rready)
   );
+
+  // ---------------- Utility: compute NCO tuning word ----------------
+  function automatic [31:0] nco_word(input real f_hz, input real fs_hz);
+    real word_r;
+    begin
+      // word = round(2^PHASE_W * f/fs)
+      word_r = (f_hz * (2.0**PHASE_W)) / fs_hz;
+      if (word_r < 0.0) word_r = word_r + (2.0**PHASE_W); // wrap for negative
+      nco_word = $rtoi(word_r);
+    end
+  endfunction
 
   // ---------------- Simple AXI tasks ----------------
   task automatic axi_write32(input [31:0] addr, input [31:0] data);
@@ -195,8 +224,6 @@ module tb_singlech_axi;
   integer zeros;
   integer bad_rc;
 
-  string if_path;
-
   // write dump file
   integer dumpfo;
 
@@ -235,7 +262,7 @@ module tb_singlech_axi;
         end
 
         samp = samp + 1;
-        if (samp <= 16) $display("[%0t] IF[%0d]=%0d", $time, samp+1, tmp);
+        //if (samp <= 16) $display("[%0t] IF[%0d]=%0d", $time, samp+1, tmp);
 
         @(posedge samp_clk);
 
@@ -300,11 +327,13 @@ module tb_singlech_axi;
 
           $fwrite(dumpfo, "%0d %0d %0d %0d %0d %0d %0d %0d %0d %0d\n",
                   dump_seq_now, ie_i, qe_i, ip_i, qp_i, il_i, ql_i, ie_pow, ip_pow, il_pow);
-
+          /*
           if (ie_pow > 40000000) begin
-            axi_write32(REG_CH0_CODE_INCR, 32'h1000_0000);
-            $display("[%0t] Signal found", $time);
+            code_incr = nco_word(CHIP_HZ_NOMINAL, FS_HZ);
+            axi_write32(REG_CH0_CODE_INCR, code_incr);
+            $display("[%0t] >>Signal was found<< code_incr=0x%08x", $time, code_incr);
           end
+          */
         end
       end
     end
@@ -329,16 +358,18 @@ module tb_singlech_axi;
   end
 
   // ---------------- Main initial ----------------
+  reg  [7:0]  prn;
+  reg  [31:0] carr_incr;
+  reg  [31:0] code_incr;
+
   initial begin
     // init signals
     fe_val = 3'sd0;
     awaddr=0; awvalid=0; wdata=0; wstrb=0; wvalid=0; bready=0;
     araddr=0; arvalid=0; rready=0;
 
-    if_path = "../sim/gps_if.txt";
-
     $display("[%0t] TB start", $time);
-    $display("[%0t] FS_HZ=%f => TCLK_NS=%f", $time, FS_HZ, TCLK_NS);
+    //$display("[%0t] FS_HZ=%f => TCLK_NS=%f", $time, FS_HZ, TCLK_NS);
 
     // Reset
     samp_rstn = 1'b0;
@@ -354,23 +385,24 @@ module tb_singlech_axi;
     axi_write32(REG_CONTROL,         32'd1);
 
     // Program channel controls (NCOs etc) BEFORE enabling PRN.
-    // Default test: no Doppler, no slew.
-    axi_write32(REG_CH0_CARR_INCR, 32'h4000_0000);
-    //axi_write32(REG_CH0_CODE_INCR, 32'h1000_0000);
-    axi_write32(REG_CH0_CODE_INCR, 32'h0ffd_ff7f);
-    axi_write32(REG_CH0_SLEW_HC,   32'd0);
+    carr_incr = nco_word(CARR_WIPE_HZ, FS_HZ);
+    code_incr = nco_word(CHIP_HZ, FS_HZ);
+    axi_write32(REG_CH0_CARR_INCR, carr_incr);
+    axi_write32(REG_CH0_CODE_INCR, code_incr);
+    //axi_write32(REG_CH0_SLEW_HC,   32'd0); // No code slew
+    $display("[%0t] carr_incr=0x%08x code_incr=0x%08x", $time, carr_incr, code_incr);
 
     // Open IF + dump files
-    $display("[%0t] Opening IF file %s", $time, if_path);
-    fi = $fopen(if_path, "r");
+    $display("[%0t] Opening IF file %s", $time, INFILE);
+    fi = $fopen(INFILE, "r");
     if (fi == 0) begin
       $display("[%0t] ERROR: cannot open IF file", $time);
       $finish;
     end
 
-    dumpfo = $fopen("gps_dump_axi.txt", "w");
+    dumpfo = $fopen(OUTFILE, "w");
     if (dumpfo == 0) begin
-      $display("[%0t] ERROR: cannot open gps_dump_axi.txt", $time);
+      $display("[%0t] ERROR: cannot open output file %s", $time, OUTFILE);
       $finish;
     end
     $fwrite(dumpfo, "# dump_seq ie qe ip qp il ql ie_pow ip_pow il_pow\n");
@@ -378,7 +410,7 @@ module tb_singlech_axi;
     // Preload IF[1]
     rc = $fscanf(fi, "%d\n", fe_val);
     if (rc != 1) fe_val = 0;
-    $display("[%0t] Preload IF[1]=%0d into fe_val before releasing samp_rstn", $time, fe_val);
+    //$display("[%0t] Preload IF[1]=%0d into fe_val before releasing samp_rstn", $time, fe_val);
 
     // Release sampling reset on a clean edge.
     @(negedge samp_clk);
@@ -388,7 +420,8 @@ module tb_singlech_axi;
     repeat (8) @(posedge samp_clk);
 
     // Enable channel by writing PRN!=0.
-    axi_write32(REG_CH0_PRN, 32'd1);
+    prn = PRN_ID[7:0];
+    axi_write32(REG_CH0_PRN, prn);
 
     $display("[%0t] Deassert samp_rstn; channel enabled by PRN write", $time);
 

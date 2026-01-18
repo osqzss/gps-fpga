@@ -5,7 +5,7 @@
 // - Writes Early/Prompt/Late I/Q accumulations at each DUMP to gps_dump.txt
 //
 // Build (example):
-//   iverilog -g2012 -o sim tb_gps_ca_correlator_channel.v gps_ca_correlator_channel.v
+//   iverilog -g2012 -o sim tb_gps_ca_correlator_channel.sv gps_ca_correlator_channel.sv
 // Run:
 //   vvp sim
 //
@@ -32,8 +32,8 @@ module tb_gps_ca_correlator_channel;
 
   // Match your IF simulator settings:
   localparam int  PRN_ID               = 1;        // 1..32
-  localparam real CARR_DOPPLER_HZ      = 1500.0;      // e.g., +2500.0
-  localparam real CODE_DOPPLER_HZ      = -0.5e3;      // e.g., +1.0 (chips/sec), if simulated
+  localparam real CARR_DOPPLER_HZ      = 0.0;      // e.g., +2500.0
+  localparam real CODE_DOPPLER_HZ      = 0.0;      // e.g., +1.0 (chips/sec), if simulated
   localparam int  CODE_DELAY_HALFCHIPS = 0;        // initial code delay (halfchips), if you want to request slew
 
   // Input/output file names (default gps_if.txt)
@@ -244,11 +244,12 @@ module tb_gps_ca_correlator_channel;
           i_late, q_late,
           ie_pow, ip_pow, il_pow
         );
-
+        /*
         if (ie_pow > 40000000) begin
           code_incr = 32'h1000_0000;
           $display("[%0t] Signal was found. Set code_incr=0x%08x", $time, code_incr);
         end
+        */
       end
     end
 

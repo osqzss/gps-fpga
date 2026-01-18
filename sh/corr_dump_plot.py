@@ -1,9 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import argparse
 
 # --------------------------------------------------------------------
-# Load corr_dump.txt
-# Expected columns (as written by tb_tracking_channel):
+# Load correlator dump file
+# Expected columns (as written by TB):
 #   0: dump_count
 #   1: i_early
 #   2: q_early
@@ -15,7 +16,11 @@ import matplotlib.pyplot as plt
 #   8: ip_pow
 #   9: il_pow
 # --------------------------------------------------------------------
-d0 = np.loadtxt("gps_dump_axi.txt")
+ap = argparse.ArgumentParser()
+ap.add_argument("--file", required=True, help="Correlator dump file from TB")
+args = ap.parse_args()
+
+d0 = np.loadtxt(args.file)
 
 t0 = d0[:, 0] # dump_count
 
